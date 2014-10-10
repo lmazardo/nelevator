@@ -1,5 +1,7 @@
 require('source-map-support').install()
 
+nodeunit = require('nodeunit')
+
 engine = require('./engine')
 
 # GET /<id>
@@ -53,121 +55,227 @@ engine = require('./engine')
 # GET /12043
 # PUT /12043/UP
 
-exports.testShouldReturnNextCall = (test) ->
-  engine.scenario [{from: 2,to: [1]},{from: 3,to: [2]}]
-  engine.reset '12043'
+exports.basics = nodeunit.testCase
+  testShouldReturnNextCall: (test) ->
+    engine.scenario [{from: 2,to: [1]},{from: 3,to: [2]}]
+    engine.reset '12043'
+  
+    test.deepEqual engine.get('12043'),
+      event: "call"
+      floor: 2
+  
+    test.deepEqual engine.get('12043'),
+      event: "call"
+      floor: 3
+  
+    test.done()
+  
+  testShouldRotateThroughScenario: (test) ->
+    engine.scenario [{from: 2,to: [1]}]
+    engine.reset '12043'
+  
+    test.deepEqual engine.get('12043'),
+      event: "call"
+      floor: 2
+  
+    test.deepEqual engine.get('12043'),
+      event: "call"
+      floor: 2
+  
+    test.done()
+  
+  testShouldAcceptNothingScenarioSteps: (test) ->
+    engine.scenario [null]
+    engine.reset '12043'
+  
+    test.deepEqual engine.get('12043'),
+      event: "nothing"
+  
+    test.done()
+  
+  testPeopleShouldGoInIfOpenAtFloor: (test) ->
+    engine.scenario [{from: 0,to: [1]},null]
+    engine.reset '12043'
+    engine.put('12043', 'OPEN')
+  
+    test.deepEqual engine.get('12043'),
+      event: "enter"
+      people: 1
+  
+    test.done()
+  
+  testPeopleShouldPressButtonWhenIn: (test) ->
+    engine.scenario [{from: 1,to: [2]},null,null]
+    engine.reset '12043'
+    engine.put('12043', 'UP')
+    engine.put('12043', 'OPEN')
+    engine.get('12043') #people enter
+  
+    test.deepEqual engine.get('12043'),
+      event: "go"
+      floor: 2
+  
+    test.done()
+  
+  testPeopleShouldGoOutIfOpenAtFloor: (test) ->
+    engine.scenario [{from: 0,to: [1]},null,null,null]
+    engine.reset '12043'
+    engine.put('12043', 'OPEN')
+    engine.get('12043') #people enter
+    engine.put('12043', 'CLOSE')
+    engine.get('12043') #people ask to go to 1
+    engine.put('12043', 'UP')
+    engine.put('12043', 'OPEN')
+  
+    test.deepEqual engine.get('12043'),
+      event: "exit"
+      people: 1
+  
+    test.done()
+  
+  testEngineShouldSupportBlindElevators: (test) ->
+    engine.scenario [{from: 0,to: [1]},null,null,null,null]
+    engine.reset '12043'
+    engine.put('12043', 'OPEN')
+    engine.put('12043', 'CLOSE') #people entered just before this PUT
+    engine.put('12043', 'UP')    #people asked to go to 1 just before this PUT
+    engine.put('12043', 'OPEN')
+  
+    test.deepEqual engine.get('12043'),
+      event: "exit"
+      people: 1
+  
+    test.done()
+  
+  testFIXWhenPeopleAreInTheyAreIn: (test) ->
+    engine.scenario [{from: 0,to: [1]},null,null,null,null]
+    engine.reset '12043'
+    engine.put('12043', 'OPEN')
+  
+    test.deepEqual engine.get('12043'),
+      event: "enter"
+      people: 1
+  
+    test.deepEqual engine.get('12043'),
+      event: "go"
+      floor: 1
+  
+    test.deepEqual engine.get('12043'),
+      event: "nothing"
+  
+    test.done()
+  
+  testFIXDoNotFailWhenNoOneEverWaitedAtFloorAndOpen: (test) ->
+    engine.scenario [{from: 1,to: [2]},null,null,null,null]
+    engine.reset '12043'
+    engine.put('12043', 'OPEN')
+  
+    test.deepEqual engine.get('12043'),
+      event: "nothing"
+  
+    test.done()
 
-  test.deepEqual engine.get('12043'),
-    event: "call"
-    floor: 2
+exports.checks = nodeunit.testCase
+  testShouldFailWhenGettingForUnexistingElevator: (test) ->
 
-  test.deepEqual engine.get('12043'),
-    event: "call"
-    floor: 3
+    test.throws(() ->
+      engine.get('12034')
+    , engine.Uninitialized)
 
-  test.done()
+    test.done()
 
-exports.testShouldRotateThroughScenario = (test) ->
-  engine.scenario [{from: 2,to: [1]}]
-  engine.reset '12043'
+  testShouldFailWhenMovingUPWithDoorsOpen: (test) ->
 
-  test.deepEqual engine.get('12043'),
-    event: "call"
-    floor: 2
+    test.throws(() ->
+      engine.reset('12043')
+      engine.put('12043', 'OPEN')
+      engine.put('12043', 'UP') #sprouitch
+    , engine.DoorsOpenMove)
 
-  test.deepEqual engine.get('12043'),
-    event: "call"
-    floor: 2
+    test.done()
 
-  test.done()
+  testShouldFailWhenMovingDownWithDoorsOpen: (test) ->
 
-exports.testShouldAcceptNothingScenarioSteps = (test) ->
-  engine.scenario [null]
-  engine.reset '12043'
+    test.throws(() ->
+      engine.reset('12043')
+      engine.put('12043', 'OPEN')
+      engine.put('12043', 'DOWN') #sprouitch
+    , engine.DoorsOpenMove)
 
-  test.deepEqual engine.get('12043'),
-    event: "nothing"
+    test.done()
 
-  test.done()
+  testShouldFailForUnknownCommands: (test) ->
 
-exports.testPeopleShouldGoInIfOpenAtFloor = (test) ->
-  engine.scenario [{from: 0,to: [1]},null]
-  engine.reset '12043'
-  engine.put('12043', 'OPEN')
+    test.throws(() ->
+      engine.reset('12043')
+      engine.put('12043', 'DTC')
+    , engine.UnknownCommand)
 
-  test.deepEqual engine.get('12043'),
-    event: "enter"
-    people: 1
+    test.done()
 
-  test.done()
+  testShouldFailWhenNotResettingAfterError: (test) ->
+    
+    engine.reset('12043')
+    try
+      engine.put('12043', 'DTC')
+    catch
+      # ignore
 
-exports.testPeopleShouldPressButtonWhenIn = (test) ->
-  engine.scenario [{from: 1,to: [2]},null,null]
-  engine.reset '12043'
-  engine.put('12043', 'UP')
-  engine.put('12043', 'OPEN')
-  engine.get('12043') #people enter
+    test.throws(() ->
+      engine.get('12043')
+    , engine.Uninitialized)
 
-  test.deepEqual engine.get('12043'),
-    event: "go"
-    floor: 2
+    test.done()
 
-  test.done()
+  testShouldFailWhenDiggingThroughTheGround: (test) ->
+    engine.building {min: 0,max: 0}
+    engine.reset('12043')
 
-exports.testPeopleShouldGoOutIfOpenAtFloor = (test) ->
-  engine.scenario [{from: 0,to: [1]},null,null,null]
-  engine.reset '12043'
-  engine.put('12043', 'OPEN')
-  engine.get('12043') #people enter
-  engine.put('12043', 'CLOSE')
-  engine.get('12043') #people ask to go to 1
-  engine.put('12043', 'UP')
-  engine.put('12043', 'OPEN')
+    test.throws(() ->
+      engine.put('12043', 'DOWN')
+    , engine.NoSuchFloor)
 
-  test.deepEqual engine.get('12043'),
-    event: "exit"
-    people: 1
+    test.done()
 
-  test.done()
+  testShouldFailWhenFlyingOverTheCeiling: (test) ->
+    engine.building {min: 0,max: 0}
+    engine.reset('12043')
 
-exports.testEngineShouldSupportBlindElevators = (test) ->
-  engine.scenario [{from: 0,to: [1]},null,null,null,null]
-  engine.reset '12043'
-  engine.put('12043', 'OPEN')
-  engine.put('12043', 'CLOSE') #people entered just before this PUT
-  engine.put('12043', 'UP')    #people asked to go to 1 just before this PUT
-  engine.put('12043', 'OPEN')
+    test.throws(() ->
+      engine.put('12043', 'UP')
+    , engine.NoSuchFloor)
 
-  test.deepEqual engine.get('12043'),
-    event: "exit"
-    people: 1
+    test.done()
 
-  test.done()
+exports.scoring = nodeunit.testCase
+  # 1 people reaching its floor : + 10
+  # elevator crashing           : -100
+  testElevatorStartsWithZeroPoints: (test) ->
+    engine.reset('zero')
 
-exports.testFIXWhenPeopleAreInTheyAreIn = (test) ->
-  engine.scenario [{from: 0,to: [1]},null,null,null,null]
-  engine.reset '12043'
-  engine.put('12043', 'OPEN')
+    test.equals 0, engine.score('zero')
 
-  test.deepEqual engine.get('12043'),
-    event: "enter"
-    people: 1
+    test.done()
 
-  test.deepEqual engine.get('12043'),
-    event: "go"
-    floor: 1
+  testElevatorGainPointsWhenPeopleReachTheirFloor: (test) ->
+    engine.scenario([{from: 0, to: [0, 0]},null,null])
+    engine.reset('1people')
+    engine.put('1people', 'OPEN')
+    engine.put('1people', 'CLOSE')
+    engine.put('1people', 'OPEN')
+    engine.get('1people')
 
-  test.deepEqual engine.get('12043'),
-    event: "nothing"
+    test.equals 20, engine.score('1people')
 
-  test.done()
+    test.done()
 
-exports.testFIXDoNotFailWhenNoOneEverWaitedAtFloorAndOpen = (test) ->
-  engine.scenario [{from: 1,to: [2]},null,null,null,null]
-  engine.reset '12043'
-  engine.put('12043', 'OPEN')
+  testElevatorLoosePointsForInvalidMove: (test) ->
+    engine.reset('crash')
+    try
+      engine.put('crash', 'DOWN')
+    catch
+      #ignore
 
-  test.deepEqual engine.get('12043'),
-    event: "nothing"
+    test.equals -100, engine.score('crash')
 
-  test.done()
+    test.done()
